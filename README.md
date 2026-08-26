@@ -56,13 +56,6 @@ predictable name and receive subsequent asset uploads. Version 21 scopes the
 file publishing role to same-account buckets. Re-bootstrapping clears it and is
 independent of any app deploy.
 
-## Rolling back
-
-`docs/ROLLBACK.md` is the runbook for the CDK toolchain deploy. Read the
-pre-deploy capture step *before* deploying -- two of the four rollback options
-depend on artifacts that only exist if you capture them first, and reverting the
-commit is not a working rollback path.
-
 ## Notes
 
 - `cdk.context.json` holds the AWS account, region, CodeConnections ARN, and the
