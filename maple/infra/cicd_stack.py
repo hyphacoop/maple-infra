@@ -1,7 +1,4 @@
-import os
-
-from aws_cdk import IgnoreMode, Stack
-from aws_cdk import aws_codebuild as codebuild
+from aws_cdk import Stack
 from aws_cdk import pipelines
 
 from .maple_application_stage import MapleApplication
@@ -25,10 +22,14 @@ class CiCdStack(Stack):
                     trigger_on_push=True,
                 ),
                 commands=[
-                    "pip install poetry",
-                    "poetry lock --check",
-                    "poetry install --only main",
-                    "npm install -g aws-cdk",
+                    "pip install uv==0.12.6",
+                    "uv python install 3.12",
+                    # Replaces the removed `poetry lock --check`: fails the
+                    # build if uv.lock is out of sync with pyproject.toml.
+                    "uv sync --locked --no-dev",
+                    "npm install -g aws-cdk@2.1139.0",
+                    # The CDK CLI is an npm binary; it enters the uv
+                    # environment via the `app` command in cdk.json.
                     "cdk synth",
                 ],
             ),

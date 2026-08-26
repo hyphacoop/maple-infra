@@ -1,7 +1,4 @@
-from aws_cdk import CfnOutput, Stage
-from aws_cdk import aws_elasticloadbalancingv2 as elbv2
-
-from maple.infra.api_gateway import ApiGateway
+from aws_cdk import Stage
 
 from .lobbying_stack import LobbyingStack
 from .search_api import SearchApi

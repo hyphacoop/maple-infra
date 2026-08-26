@@ -1,11 +1,7 @@
 from typing import Literal
 
-from aws_cdk import aws_apigatewayv2_alpha as apigw
-from aws_cdk import aws_apigatewayv2_integrations_alpha as apigw_integrations
+from aws_cdk import aws_apigatewayv2 as apigw
 from aws_cdk import aws_ec2 as ec2
-from aws_cdk import aws_ecs as ecs
-from aws_cdk import aws_elasticloadbalancingv2 as elbv2
-from aws_cdk.aws_apigatewayv2 import CfnStage
 from constructs import Construct
 
 EnvName = Literal["dev", "prod"]
