@@ -27,20 +27,31 @@ PROD_TASK_DEFINITION = "SearchApiSearchTaskDefinition547D8A1B"
 DEV_TASK_DEFINITION = "DevSearchApiSearchTaskDefinitionE5EA1B9E"
 
 
-@pytest.fixture(scope="module")
-def shared_stack_template() -> Template:
+def _synth_shared_stack(context: dict) -> Template:
     """Synthesize the app the way app.py does and return the shared stack."""
-    app = cdk.App(context=CONTEXT)
+    app = cdk.App(context=context)
     cicd = CiCdStack(
         app,
         "Maple",
         env=cdk.Environment(
-            account=CONTEXT["root_account_arn"],
-            region=CONTEXT["primary_region"],
+            account=context["root_account_arn"],
+            region=context["primary_region"],
         ),
     )
     stage = cicd.node.find_child("App")
     return Template.from_stack(stage.node.find_child("SharedStack"))
+
+
+@pytest.fixture(scope="module")
+def shared_stack_template() -> Template:
+    return _synth_shared_stack(CONTEXT)
+
+
+@pytest.fixture(scope="module")
+def restored_shared_stack_template() -> Template:
+    """The shared stack synthesized with a rollback snapshot id set."""
+    context = {**CONTEXT, "search_restore_snapshot_id": "snap-0bf402788b535f7cf"}
+    return _synth_shared_stack(context)
 
 
 def resources_of_type(template: Template, cfn_type: str) -> dict:
@@ -84,3 +95,33 @@ def test_typesense_image_matches_context(
     assert logical_id in resources
     containers = resources[logical_id]["Properties"]["ContainerDefinitions"]
     assert [c["Image"] for c in containers] == [CONTEXT[context_key]]
+
+
+def _launch_config(template: Template) -> dict:
+    resources = resources_of_type(template, "AWS::AutoScaling::LaunchConfiguration")
+    assert len(resources) == 1
+    return next(iter(resources.values()))
+
+
+def test_restore_snapshot_absent_by_default(shared_stack_template: Template) -> None:
+    """search_restore_snapshot_id is null in cdk.context.json, so this is a no-op."""
+    properties = _launch_config(shared_stack_template)["Properties"]
+    assert "BlockDeviceMappings" not in properties
+    assert "/dev/xvdb" not in json.dumps(properties["UserData"])
+
+
+def test_restore_snapshot_attaches_and_copies_when_set(
+    restored_shared_stack_template: Template,
+) -> None:
+    """Setting search_restore_snapshot_id attaches the snapshot and seeds both volumes."""
+    properties = _launch_config(restored_shared_stack_template)["Properties"]
+
+    mappings = properties["BlockDeviceMappings"]
+    assert len(mappings) == 1
+    assert mappings[0]["DeviceName"] == "/dev/xvdb"
+    assert mappings[0]["Ebs"]["SnapshotId"] == "snap-0bf402788b535f7cf"
+
+    user_data = json.dumps(properties["UserData"])
+    assert "mount -o ro /dev/xvdb /mnt/restore" in user_data
+    assert "search-prod-data" in user_data
+    assert "search-dev-data" in user_data

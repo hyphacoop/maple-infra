@@ -1,4 +1,5 @@
 from aws_cdk import Duration, RemovalPolicy, Stack
+from aws_cdk import aws_autoscaling as autoscaling
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_iam as iam
@@ -50,6 +51,14 @@ class SharedStack(Stack):
             vpc=self.vpc,
         )
 
+        # Break-glass rollback: null in normal operation. Setting this to a
+        # snapshot id and deploying replaces the cluster instance (same
+        # mechanism as any other launch-config change) and seeds it with that
+        # snapshot's Typesense data. See #11 -- do not substitute another
+        # restore mechanism (an AMI rebuild and a root-device override were
+        # both tried and rejected).
+        restore_snapshot_id = self.node.try_get_context("search_restore_snapshot_id")
+
         capacity = self.cluster.add_capacity(
             "BaseCapacity",
             instance_type=ec2.InstanceType("t4g.large"),
@@ -57,6 +66,18 @@ class SharedStack(Stack):
             key_name=self.ssh_key_pair.key_name,
             machine_image=ecs.EcsOptimizedImage.amazon_linux2(ecs.AmiHardwareType.ARM),
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+            block_devices=(
+                [
+                    autoscaling.BlockDevice(
+                        device_name="/dev/xvdb",
+                        volume=autoscaling.BlockDeviceVolume.ebs_from_snapshot(
+                            restore_snapshot_id, delete_on_termination=True
+                        ),
+                    )
+                ]
+                if restore_snapshot_id
+                else None
+            ),
         )
 
         # Tasks run in awsvpc mode, so without this they can reach the instance
@@ -76,6 +97,25 @@ class SharedStack(Stack):
             "sudo service iptables save",
             "echo ECS_AWSVPC_BLOCK_IMDS=true >> /etc/ecs/ecs.config",
         )
+
+        # Break-glass restore, kept as a separate call so the lines above stay
+        # byte-identical when restore_snapshot_id is null. Stops the ECS agent
+        # before copying so a starting task can't race the copy for the same
+        # RocksDB directory, then copies only the two Typesense docker volumes
+        # off the attached snapshot -- not the whole /dev/xvdb tree -- so
+        # nothing else on the restored root disk touches the live instance.
+        if restore_snapshot_id:
+            capacity.add_user_data(
+                "sudo mkdir -p /mnt/restore",
+                "sudo mount -o ro /dev/xvdb /mnt/restore",
+                "sudo systemctl stop ecs",
+                "sudo cp -a /mnt/restore/var/lib/docker/volumes/search-prod-data "
+                "/var/lib/docker/volumes/",
+                "sudo cp -a /mnt/restore/var/lib/docker/volumes/search-dev-data "
+                "/var/lib/docker/volumes/",
+                "sudo umount /mnt/restore",
+                "sudo systemctl start ecs",
+            )
 
         # The image is resolved from an SSM parameter that tracks the current
         # recommended ECS-optimized AMI, so CloudFormation re-resolves it on
