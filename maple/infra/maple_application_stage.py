@@ -27,6 +27,7 @@ class MapleApplication(Stage):
             env_name="prod",
             api=base.api,
             cluster=base.cluster,
+            image=self.node.get_context("typesense_image_prod"),
         )
 
         self.dev_search: SearchApi = SearchApi(
@@ -35,6 +36,7 @@ class MapleApplication(Stage):
             env_name="dev",
             api=base.api,
             cluster=base.cluster,
+            image=self.node.get_context("typesense_image_dev"),
         )
 
         self.lobbying: LobbyingStack = LobbyingStack(

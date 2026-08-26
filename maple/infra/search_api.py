@@ -25,11 +25,12 @@ class SearchApi(Construct):
         env_name: EnvName,
         api: ApiGateway,
         cluster: ecs.Cluster,
+        image: str,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.create_service(cluster, service_names[env_name])
+        self.create_service(cluster, service_names[env_name], image)
 
         api.get(env_name).add_routes(
             path="/search/{route+}",
@@ -48,6 +49,7 @@ class SearchApi(Construct):
         self,
         cluster: ecs.Cluster,
         service_name: str,
+        image: str,
     ):
         # Create a volume configuration for the EFS file system
         volume = ecs.Volume(
@@ -80,9 +82,7 @@ class SearchApi(Construct):
         # EFS volume
         self.container: ecs.ContainerDefinition = self.definition.add_container(
             "TypesenseContainer",
-            image=ecs.ContainerImage.from_registry(
-                self.node.get_context("typesense_image")
-            ),
+            image=ecs.ContainerImage.from_registry(image),
             # entry_point=["bash"],
             # command=[
             #     "-c",

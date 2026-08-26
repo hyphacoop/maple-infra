@@ -69,11 +69,18 @@ def test_admin_key_secret_logical_id_is_stable(
     )
 
 
-@pytest.mark.parametrize("logical_id", [PROD_TASK_DEFINITION, DEV_TASK_DEFINITION])
+@pytest.mark.parametrize(
+    ("logical_id", "context_key"),
+    [
+        (PROD_TASK_DEFINITION, "typesense_image_prod"),
+        (DEV_TASK_DEFINITION, "typesense_image_dev"),
+    ],
+)
 def test_typesense_image_matches_context(
-    shared_stack_template: Template, logical_id: str
+    shared_stack_template: Template, logical_id: str, context_key: str
 ) -> None:
+    """Each environment pins its own image, so they can be upgraded separately."""
     resources = resources_of_type(shared_stack_template, "AWS::ECS::TaskDefinition")
     assert logical_id in resources
     containers = resources[logical_id]["Properties"]["ContainerDefinitions"]
-    assert [c["Image"] for c in containers] == [CONTEXT["typesense_image"]]
+    assert [c["Image"] for c in containers] == [CONTEXT[context_key]]
