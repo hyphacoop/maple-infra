@@ -13,6 +13,23 @@ service_names = {
     "prod": "search-prod",
 }
 
+# (min_healthy_percent, max_healthy_percent) per environment.
+#
+# Typesense stores documents in RocksDB, which takes an exclusive lock on its
+# data directory. Both tasks would land on the single container instance and
+# mount the same shared Docker volume, so a replacement task that starts while
+# the outgoing one is still running cannot open the data directory and exits.
+# 0/100 forbids that overlap and forces stop-then-start, trading a brief gap for
+# a deployment that cannot wedge.
+#
+# Prod keeps CDK's 50/200 default so that shipping the dev upgrade leaves the
+# prod service byte-identical to what is deployed. It needs 0/100 too before its
+# next task definition change, tracked in #13.
+deployment_percentages = {
+    "dev": (0, 100),
+    "prod": (50, 200),
+}
+
 
 class SearchApi(Construct):
     """Configures a Typesense instance running on an ECS Cluster."""
@@ -30,7 +47,9 @@ class SearchApi(Construct):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.create_service(cluster, service_names[env_name], image)
+        self.create_service(
+            cluster, service_names[env_name], image, *deployment_percentages[env_name]
+        )
 
         api.get(env_name).add_routes(
             path="/search/{route+}",
@@ -50,6 +69,8 @@ class SearchApi(Construct):
         cluster: ecs.Cluster,
         service_name: str,
         image: str,
+        min_healthy_percent: int,
+        max_healthy_percent: int,
     ):
         # Create a volume configuration for the EFS file system
         volume = ecs.Volume(
@@ -71,9 +92,10 @@ class SearchApi(Construct):
         )
 
         # Create a Task Definition
-        self.definition: ecs.Ec2TaskDefinition = ecs.Ec2TaskDefinition(
+        self.definition: ecs.TaskDefinition = ecs.TaskDefinition(
             self,
             "SearchTaskDefinition",
+            compatibility=ecs.Compatibility.EC2,
             volumes=[volume],
             network_mode=ecs.NetworkMode.AWS_VPC,
         )
@@ -122,6 +144,8 @@ class SearchApi(Construct):
                 name=service_name,
                 dns_record_type=sd.DnsRecordType.SRV,
             ),
+            min_healthy_percent=min_healthy_percent,
+            max_healthy_percent=max_healthy_percent,
         )
 
         self.service.connections.allow_from_any_ipv4(ec2.Port.all_traffic())
