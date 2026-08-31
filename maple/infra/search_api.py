@@ -47,8 +47,13 @@ class SearchApi(Construct):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        min_healthy, max_healthy = deployment_percentages[env_name]
         self.create_service(
-            cluster, service_names[env_name], image, *deployment_percentages[env_name]
+            cluster,
+            service_names[env_name],
+            image,
+            min_healthy_percent=min_healthy,
+            max_healthy_percent=max_healthy,
         )
 
         api.get(env_name).add_routes(
@@ -69,6 +74,7 @@ class SearchApi(Construct):
         cluster: ecs.Cluster,
         service_name: str,
         image: str,
+        *,
         min_healthy_percent: int,
         max_healthy_percent: int,
     ):

@@ -49,6 +49,13 @@ aws ssm get-parameter --name /cdk-bootstrap/hnb659fds/version \
 
 If the deployed number is lower, run `cdk bootstrap aws://<account>/<region>`.
 
+One-time note for the poetry-to-uv migration: the pipeline is self-mutating,
+and its *deployed* Synth step still runs the old poetry commands. The first
+commit that removes `poetry.lock` therefore fails Synth before SelfMutate can
+pick up the new commands, and a revert push fails the same way. That commit
+must be deployed once by hand — `cdk deploy Maple` from a credentialed
+workstation — after which pushes to `main` self-mutate normally again.
+
 Separately, bootstrap versions below 21 are affected by AWS advisory
 [aws-cdk#31885](https://github.com/aws/aws-cdk/issues/31885): if the asset
 bucket alone is ever deleted, a third party can recreate it under the
