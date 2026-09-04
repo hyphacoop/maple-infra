@@ -1,4 +1,4 @@
-from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
+from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_iam as iam
@@ -8,6 +8,11 @@ from aws_cdk import aws_servicediscovery as sd
 from constructs import Construct
 
 from .api_gateway import ApiGateway
+
+# The ECS-optimized Amazon Linux 2 ARM AMI the cluster instance is currently
+# running, read from the deployed stack's resolved SsmParameterValue. us-east-1
+# only, which is the sole region this app deploys to.
+DEPLOYED_ECS_AMI = "ami-08195b29d3024785e"
 
 
 class SharedStack(Stack):
@@ -45,13 +50,42 @@ class SharedStack(Stack):
             vpc=self.vpc,
         )
 
-        self.cluster.add_capacity(
+        capacity = self.cluster.add_capacity(
             "BaseCapacity",
             instance_type=ec2.InstanceType("t4g.large"),
             desired_capacity=1,
             key_name=self.ssh_key_pair.key_name,
             machine_image=ecs.EcsOptimizedImage.amazon_linux2(ecs.AmiHardwareType.ARM),
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+
+        # Tasks run in awsvpc mode, so without this they can reach the instance
+        # metadata service and assume the EC2 instance role. CDK injected this
+        # automatically until AWS deprecated and removed the mechanism, so it
+        # has to be set explicitly to keep the pre-2.266 posture.
+        #
+        # These three lines and their order reproduce the deployed user data
+        # byte for byte. That is load-bearing, not cosmetic: user data is a
+        # LaunchConfiguration property, LaunchConfiguration has no mutable
+        # properties, and the ASG replaces itself wholesale when its launch
+        # configuration changes. Any drift here therefore destroys the instance,
+        # taking both Typesense data volumes with it.
+        capacity.add_user_data(
+            "sudo iptables --insert FORWARD 1 --in-interface docker+ "
+            "--destination 169.254.169.254/32 --jump DROP",
+            "sudo service iptables save",
+            "echo ECS_AWSVPC_BLOCK_IMDS=true >> /etc/ecs/ecs.config",
+        )
+
+        # The image is resolved from an SSM parameter that tracks the current
+        # recommended ECS-optimized AMI, so CloudFormation re-resolves it on
+        # every deploy and any AMI refresh silently replaces the instance. Pin
+        # it to the AMI already running so that instance replacement is a
+        # scheduled decision rather than a side effect of an unrelated deploy.
+        # This is deliberately temporary and pairs with the data-durability work
+        # in #7; refreshing it is safe only once the indexes outlive the host.
+        capacity.node.find_child("LaunchConfig").add_property_override(
+            "ImageId", DEPLOYED_ECS_AMI
         )
 
         self.cluster.connections.allow_from_any_ipv4(

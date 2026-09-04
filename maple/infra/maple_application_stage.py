@@ -1,7 +1,4 @@
-from aws_cdk import CfnOutput, Stage
-from aws_cdk import aws_elasticloadbalancingv2 as elbv2
-
-from maple.infra.api_gateway import ApiGateway
+from aws_cdk import Stage
 
 from .lobbying_stack import LobbyingStack
 from .search_api import SearchApi
@@ -30,6 +27,7 @@ class MapleApplication(Stage):
             env_name="prod",
             api=base.api,
             cluster=base.cluster,
+            image=self.node.get_context("typesense_image_prod"),
         )
 
         self.dev_search: SearchApi = SearchApi(
@@ -38,6 +36,7 @@ class MapleApplication(Stage):
             env_name="dev",
             api=base.api,
             cluster=base.cluster,
+            image=self.node.get_context("typesense_image_dev"),
         )
 
         self.lobbying: LobbyingStack = LobbyingStack(

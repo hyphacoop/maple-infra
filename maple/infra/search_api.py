@@ -1,14 +1,7 @@
-import builtins
-from typing import Literal
-
-from aws_cdk import Stack
-from aws_cdk import aws_apigatewayv2_alpha as apigw
-from aws_cdk import aws_apigatewayv2_integrations_alpha as apigw_integrations
+from aws_cdk import aws_apigatewayv2 as apigw
+from aws_cdk import aws_apigatewayv2_integrations as apigw_integrations
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
-from aws_cdk import aws_efs as efs
-from aws_cdk import aws_elasticloadbalancingv2 as elbv2
-from aws_cdk import aws_elasticloadbalancingv2_targets as elbv2_targets
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_servicediscovery as sd
 from constructs import Construct
@@ -18,6 +11,23 @@ from .api_gateway import ApiGateway, EnvName
 service_names = {
     "dev": "search-dev",
     "prod": "search-prod",
+}
+
+# (min_healthy_percent, max_healthy_percent) per environment.
+#
+# Typesense stores documents in RocksDB, which takes an exclusive lock on its
+# data directory. Both tasks would land on the single container instance and
+# mount the same shared Docker volume, so a replacement task that starts while
+# the outgoing one is still running cannot open the data directory and exits.
+# 0/100 forbids that overlap and forces stop-then-start, trading a brief gap for
+# a deployment that cannot wedge.
+#
+# Prod keeps CDK's 50/200 default so that shipping the dev upgrade leaves the
+# prod service byte-identical to what is deployed. It needs 0/100 too before its
+# next task definition change, tracked in #13.
+deployment_percentages = {
+    "dev": (0, 100),
+    "prod": (50, 200),
 }
 
 
@@ -32,11 +42,19 @@ class SearchApi(Construct):
         env_name: EnvName,
         api: ApiGateway,
         cluster: ecs.Cluster,
+        image: str,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.create_service(cluster, service_names[env_name])
+        min_healthy, max_healthy = deployment_percentages[env_name]
+        self.create_service(
+            cluster,
+            service_names[env_name],
+            image,
+            min_healthy_percent=min_healthy,
+            max_healthy_percent=max_healthy,
+        )
 
         api.get(env_name).add_routes(
             path="/search/{route+}",
@@ -55,6 +73,10 @@ class SearchApi(Construct):
         self,
         cluster: ecs.Cluster,
         service_name: str,
+        image: str,
+        *,
+        min_healthy_percent: int,
+        max_healthy_percent: int,
     ):
         # Create a volume configuration for the EFS file system
         volume = ecs.Volume(
@@ -76,9 +98,10 @@ class SearchApi(Construct):
         )
 
         # Create a Task Definition
-        self.definition: ecs.Ec2TaskDefinition = ecs.Ec2TaskDefinition(
+        self.definition: ecs.TaskDefinition = ecs.TaskDefinition(
             self,
             "SearchTaskDefinition",
+            compatibility=ecs.Compatibility.EC2,
             volumes=[volume],
             network_mode=ecs.NetworkMode.AWS_VPC,
         )
@@ -87,9 +110,7 @@ class SearchApi(Construct):
         # EFS volume
         self.container: ecs.ContainerDefinition = self.definition.add_container(
             "TypesenseContainer",
-            image=ecs.ContainerImage.from_registry(
-                self.node.get_context("typesense_image")
-            ),
+            image=ecs.ContainerImage.from_registry(image),
             # entry_point=["bash"],
             # command=[
             #     "-c",
@@ -129,6 +150,8 @@ class SearchApi(Construct):
                 name=service_name,
                 dns_record_type=sd.DnsRecordType.SRV,
             ),
+            min_healthy_percent=min_healthy_percent,
+            max_healthy_percent=max_healthy_percent,
         )
 
         self.service.connections.allow_from_any_ipv4(ec2.Port.all_traffic())

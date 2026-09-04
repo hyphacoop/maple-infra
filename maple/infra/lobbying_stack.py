@@ -1,13 +1,6 @@
-import os
-
-from aws_cdk import CfnOutput, Duration, IgnoreMode, Stack, StackProps
+from aws_cdk import Stack
 from aws_cdk import aws_ecs as ecs
-from aws_cdk import aws_events as events
-from aws_cdk import aws_events_targets as targets
-from aws_cdk import aws_iam as iam
-from aws_cdk import aws_lambda as _lambda
 from aws_cdk import aws_rds as rds
-from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 
@@ -19,7 +12,7 @@ class LobbyingStack(Stack):
         *,
         cluster: ecs.Cluster,
         db: rds.DatabaseInstance,
-        **kwargs
+        **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 

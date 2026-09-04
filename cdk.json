@@ -1,5 +1,5 @@
 {
-  "app": "poetry run python3 app.py",
+  "app": "uv run --frozen --no-dev python3 app.py",
   "watch": {
     "include": [
       "**"
@@ -7,7 +7,6 @@
     "exclude": [
       "README.md",
       "cdk*.json",
-      "requirements*.txt",
       "source.bat",
       "**/__init__.py",
       "python/__pycache__",
@@ -42,6 +41,7 @@
     "@aws-cdk/aws-codedeploy:removeAlarmsFromDeploymentGroup": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
     "@aws-cdk/aws-ec2:launchTemplateDefaultUserData": true,
-    "@aws-cdk/aws-secretsmanager:useAttachedSecretResourcePolicyForSecretTargetAttachments": true
+    "@aws-cdk/aws-secretsmanager:useAttachedSecretResourcePolicyForSecretTargetAttachments": true,
+    "@aws-cdk/aws-ecs:removeDefaultDeploymentAlarm": true
   }
 }
