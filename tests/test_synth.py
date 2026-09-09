@@ -99,11 +99,17 @@ def test_services_forbid_overlapping_tasks(
     breaker is configured, so ECS retries that rather than failing fast.
     """
     services = shared_stack_template.find_resources("AWS::ECS::Service")
-    assert logical_id in services
-    assert services[logical_id]["Properties"]["DeploymentConfiguration"] == {
-        "MinimumHealthyPercent": 0,
-        "MaximumPercent": 100,
-    }
+    assert logical_id in services, (
+        f"{logical_id} is missing. Renaming or re-scoping the SearchApi / "
+        f"DevSearchApi constructs or their Ec2Service would replace the "
+        f"service, and this assertion would stop checking anything."
+    )
+    # Asserted key by key rather than against the whole DeploymentConfiguration
+    # so that adding a deployment circuit breaker later -- the mitigation the
+    # comment in search_api.py names as missing -- does not fail this test.
+    deployment = services[logical_id]["Properties"]["DeploymentConfiguration"]
+    assert deployment["MinimumHealthyPercent"] == 0
+    assert deployment["MaximumPercent"] == 100
 
 
 def test_launch_configuration_is_byte_stable(
