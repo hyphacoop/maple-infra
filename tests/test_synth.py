@@ -37,20 +37,35 @@ PROD_SERVICE = "SearchApisearchprodService3B81384A"
 DEV_SERVICE = "DevSearchApisearchdevService86D221C4"
 
 
-@pytest.fixture(scope="module")
-def shared_stack_template() -> Template:
+RESTORE_SNAPSHOT_ID = "snap-0bf402788b535f7cf"
+
+
+def _synth_shared_stack(context: dict) -> Template:
     """Synthesize the app the way app.py does and return the shared stack."""
-    app = cdk.App(context=CONTEXT)
+    app = cdk.App(context=context)
     cicd = CiCdStack(
         app,
         "Maple",
         env=cdk.Environment(
-            account=CONTEXT["root_account_arn"],
-            region=CONTEXT["primary_region"],
+            account=context["root_account_arn"],
+            region=context["primary_region"],
         ),
     )
     stage = cicd.node.find_child("App")
     return Template.from_stack(stage.node.find_child("SharedStack"))
+
+
+@pytest.fixture(scope="module")
+def shared_stack_template() -> Template:
+    return _synth_shared_stack(CONTEXT)
+
+
+@pytest.fixture(scope="module")
+def restored_shared_stack_template() -> Template:
+    """The shared stack synthesized with a rollback snapshot id set."""
+    return _synth_shared_stack(
+        {**CONTEXT, "search_restore_snapshot_id": RESTORE_SNAPSHOT_ID}
+    )
 
 
 def test_app_synthesizes(shared_stack_template: Template) -> None:
@@ -139,3 +154,39 @@ def test_launch_configuration_is_byte_stable(
             ]
         }
     }
+
+
+def _launch_config(template: Template) -> dict:
+    launch_configs = template.find_resources("AWS::AutoScaling::LaunchConfiguration")
+    assert list(launch_configs) == ["ClusterBaseCapacityLaunchConfigA5D3E9A9"]
+    return launch_configs["ClusterBaseCapacityLaunchConfigA5D3E9A9"]
+
+
+def test_restore_snapshot_absent_by_default(shared_stack_template: Template) -> None:
+    """search_restore_snapshot_id is null in cdk.context.json, so this is inert.
+
+    This is what makes the mechanism safe to carry: with the key unset the
+    launch configuration is unchanged, so merging it would not replace the
+    instance or touch either Typesense volume.
+    """
+    properties = _launch_config(shared_stack_template)["Properties"]
+    assert "BlockDeviceMappings" not in properties
+    assert "/dev/xvdb" not in json.dumps(properties["UserData"])
+
+
+def test_restore_snapshot_attaches_and_copies_when_set(
+    restored_shared_stack_template: Template,
+) -> None:
+    """Setting the key attaches the snapshot and seeds both Typesense volumes."""
+    properties = _launch_config(restored_shared_stack_template)["Properties"]
+
+    mappings = properties["BlockDeviceMappings"]
+    assert len(mappings) == 1
+    assert mappings[0]["DeviceName"] == "/dev/xvdb"
+    assert mappings[0]["Ebs"]["SnapshotId"] == RESTORE_SNAPSHOT_ID
+
+    user_data = json.dumps(properties["UserData"])
+    assert "mount -o ro /dev/xvdb /mnt/restore" in user_data
+    assert "systemctl stop ecs" in user_data
+    assert "search-prod-data" in user_data
+    assert "search-dev-data" in user_data
